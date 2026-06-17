@@ -792,17 +792,27 @@
         var offsetSign = isStart ? "-" : "+";
         var rotationOffset = isStart ? " + 180" : "";
 
+        // Sample the direction from a short forward window of pointOnPath rather
+        // than tangentOnPath(progress). tangentOnPath is unreliable exactly at the
+        // path ends (t = 0 / t = 1) and can return a reversed tangent there, which
+        // flips the arrowhead 180 degrees. A finite difference over increasing t
+        // always points forward along the path, so the head never inverts.
+        var directionLines =
+            "var progress = " + progressExpression + ";\n" +
+            "var step = 0.002;\n" +
+            "var tEnd = Math.min(1, progress + step);\n" +
+            "var tStart = Math.max(0, tEnd - step);\n" +
+            "var direction = arrowPath.pointOnPath(tEnd) - arrowPath.pointOnPath(tStart);\n";
+
         headTransform.property("ADBE Vector Position").expression =
             "var arrowPath = " + pathReference + ";\n" +
-            "var progress = " + progressExpression + ";\n" +
-            "var direction = arrowPath.tangentOnPath(progress);\n" +
+            directionLines +
             "arrowPath.pointOnPath(progress) " + offsetSign + " normalize(direction) * " +
             strokeWidthReference + ";";
 
         headTransform.property("ADBE Vector Rotation").expression =
             "var arrowPath = " + pathReference + ";\n" +
-            "var progress = " + progressExpression + ";\n" +
-            "var direction = arrowPath.tangentOnPath(progress);\n" +
+            directionLines +
             "radiansToDegrees(Math.atan2(direction[1], direction[0]))" +
             rotationOffset + ";";
     }
