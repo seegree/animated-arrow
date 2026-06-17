@@ -33,6 +33,11 @@ C:\Program Files\Adobe\Adobe After Effects 2025\Support Files\Scripts\ScriptUI P
 4. Place the playhead where the animation should begin.
 5. Click **Create Arrow**.
 
+Alt/Option-click **Create Arrow** to create the arrow in its finished state. It
+is still built with Trim Paths (held at 100% with no keyframes), so the
+animation can be added later by giving the arrow a duration in the panel. Easing
+and duration are ignored when creating a static arrow this way.
+
 By default, the source layer is hidden after successful arrow creation. Clear
 **Hide source layer after creation** when the original layer should remain
 visible. The source is preserved either way.

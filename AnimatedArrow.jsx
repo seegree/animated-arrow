@@ -6,6 +6,7 @@
     var DEFAULT_STROKE_WIDTH = 3;
     var DEFAULT_HEAD_SIZE = 27;
     var DEFAULT_DURATION = 0.5;
+    var LABEL_WIDTH = 82;
     var selectedColor = [1, 1, 1];
     var selectedColorIsMixed = false;
     var isSyncingControls = false;
@@ -17,53 +18,50 @@
 
         panel.orientation = "column";
         panel.alignChildren = ["fill", "top"];
-        panel.spacing = 8;
-        panel.margins = 12;
+        panel.spacing = 5;
+        panel.margins = 10;
 
-        var settings = panel.add("panel", undefined, "Arrow Settings");
-        settings.orientation = "column";
-        settings.alignChildren = ["fill", "top"];
-        settings.spacing = 6;
-        settings.margins = 10;
-
-        var strokeRow = addNumberRow(settings, "Stroke width", DEFAULT_STROKE_WIDTH);
-        var headRow = addNumberRow(settings, "Arrowhead size", DEFAULT_HEAD_SIZE);
-        var durationRow = addNumberRow(settings, "Duration (seconds)", DEFAULT_DURATION);
+        var strokeRow = addNumberRow(panel, "Stroke width", DEFAULT_STROKE_WIDTH);
+        var headRow = addNumberRow(panel, "Head size", DEFAULT_HEAD_SIZE);
+        var durationRow = addNumberRow(panel, "Duration", DEFAULT_DURATION);
+        durationRow.input.helpTip = "Animation length in seconds";
         var easingRow = addDropdownRow(
-            settings,
+            panel,
             "Easing",
             ["Linear", "Easy Ease", "Ease In", "Ease Out"],
             1
         );
         var styleRow = addDropdownRow(
-            settings,
-            "Arrowhead style",
+            panel,
+            "Head style",
             ["Triangle", "Circle", "Chevron", "Diamond"],
             0
         );
         var headsRow = addDropdownRow(
-            settings,
-            "Arrowheads",
+            panel,
+            "Head at",
             ["End", "Start"],
             0
         );
 
-        var colorRow = settings.add("group");
+        var colorRow = panel.add("group");
         colorRow.orientation = "row";
         colorRow.alignChildren = ["left", "center"];
-        colorRow.add("statictext", undefined, "Color");
+        colorRow.spacing = 6;
+        var colorLabel = colorRow.add("statictext", undefined, "Color");
+        colorLabel.preferredSize.width = LABEL_WIDTH;
         var colorButton = colorRow.add("button", undefined, "");
-        colorButton.preferredSize = [48, 22];
+        colorButton.preferredSize = [44, 20];
         colorButton.helpTip = "Choose arrow color";
         var colorValue = colorRow.add("statictext", undefined, "#FFFFFF");
-        colorValue.characters = 9;
+        colorValue.characters = 8;
         var refreshButton = colorRow.add("button", undefined, "\u21BB");
-        refreshButton.preferredSize = [24, 22];
-        refreshButton.minimumSize = [24, 22];
-        refreshButton.maximumSize = [24, 22];
+        refreshButton.preferredSize = [22, 20];
+        refreshButton.minimumSize = [22, 20];
+        refreshButton.maximumSize = [22, 20];
         refreshButton.alignment = ["left", "center"];
         refreshButton.helpTip = "Load settings from selected arrows";
-        var hideSourceCheckbox = settings.add(
+        var hideSourceCheckbox = panel.add(
             "checkbox",
             undefined,
             "Hide source layer after creation"
@@ -93,18 +91,13 @@
 
         var createButton = panel.add("button", undefined, "Create Arrow");
         createButton.alignment = ["fill", "top"];
-        createButton.preferredSize.height = 34;
+        createButton.preferredSize.height = 32;
+        createButton.helpTip =
+            "Create an animated arrow from the selected paths.\n" +
+            "Alt/Option-click to create a finished, static arrow (no keyframes).";
         var reverseButton = panel.add("button", undefined, "Reverse Direction");
         reverseButton.alignment = ["fill", "top"];
-
-        var helpText = panel.add(
-            "statictext",
-            undefined,
-            "Create from selected paths. Controls and Reverse update selected generated arrows.",
-            { multiline: true }
-        );
-        helpText.alignment = ["fill", "top"];
-        helpText.preferredSize.height = 42;
+        reverseButton.helpTip = "Reverse the direction of selected generated arrows.";
 
         colorButton.onClick = function () {
             var picked = $.colorPicker();
@@ -193,6 +186,8 @@
                 return;
             }
 
+            var animate = !ScriptUI.environment.keyboardState.altKey;
+
             createArrows(
                 strokeWidth,
                 headSize,
@@ -201,7 +196,8 @@
                 easingRow.input.selection.text,
                 styleRow.input.selection.text,
                 headsRow.input.selection.text,
-                hideSourceCheckbox.value
+                hideSourceCheckbox.value,
+                animate
             );
         };
 
@@ -252,12 +248,13 @@
         var row = parent.add("group");
         row.orientation = "row";
         row.alignChildren = ["left", "center"];
+        row.spacing = 6;
 
         var labelControl = row.add("statictext", undefined, label);
-        labelControl.preferredSize.width = 135;
+        labelControl.preferredSize.width = LABEL_WIDTH;
 
         var input = row.add("edittext", undefined, String(defaultValue));
-        input.characters = 8;
+        input.characters = 6;
 
         return {
             row: row,
@@ -269,13 +266,14 @@
         var row = parent.add("group");
         row.orientation = "row";
         row.alignChildren = ["left", "center"];
+        row.spacing = 6;
 
         var labelControl = row.add("statictext", undefined, label);
-        labelControl.preferredSize.width = 135;
+        labelControl.preferredSize.width = LABEL_WIDTH;
 
         var input = row.add("dropdownlist", undefined, items);
         input.selection = selectedIndex;
-        input.preferredSize.width = 110;
+        input.preferredSize.width = 96;
 
         return {
             row: row,
@@ -378,7 +376,8 @@
         easing,
         style,
         heads,
-        hideSourceLayers
+        hideSourceLayers,
+        animate
     ) {
         var comp = app.project ? app.project.activeItem : null;
         if (!(comp instanceof CompItem)) {
@@ -416,7 +415,8 @@
                             color,
                             easing,
                             style,
-                            heads
+                            heads,
+                            animate
                         )
                     );
                 } catch (pathError) {
@@ -489,7 +489,8 @@
         color,
         easing,
         style,
-        heads
+        heads,
+        animate
     ) {
         var sourceLayer = sourcePath.propertyGroup(sourcePath.propertyDepth);
         var sourceShape = sourcePath.valueAtTime(comp.time, false);
@@ -541,9 +542,13 @@
         var trimEnd = trim.property("ADBE Vector Trim End");
         trim.property("ADBE Vector Trim Start").setValue(0);
         trim.property("ADBE Vector Trim Offset").setValue(0);
-        trimEnd.setValueAtTime(comp.time, 0);
-        trimEnd.setValueAtTime(comp.time + duration, 100);
-        applyEasing(trimEnd, easing);
+        if (animate) {
+            trimEnd.setValueAtTime(comp.time, 0);
+            trimEnd.setValueAtTime(comp.time + duration, 100);
+            applyEasing(trimEnd, easing);
+        } else {
+            trimEnd.setValue(100);
+        }
 
         var pathReference = makeExpressionReference(arrowGroup);
         if (heads === "End") {
