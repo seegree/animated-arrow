@@ -63,6 +63,14 @@ Genuinely colored icons are reserved for controls *about* color.
 what a fresh panel opens with. A user who changes nothing should get the
 designer's best output.
 
+**Left-packed beats right-aligned.** The web habit of floating utility
+controls to a row's right edge reads as untidy in a dockable panel: the
+moment the dock gets wide, those controls drift away from their group.
+Keep every row left-packed with fixed gaps; extra dock width is just
+empty panel. (Animated Arrow: the color swatch "floated right" looked
+fine at design width and orphaned at full width — hugging the easing
+tiles was the keeper.)
+
 ## 2. Gotchas (all observed in AE 2026)
 
 - **Toolbutton chrome fights custom tiles.** `iconbutton` with
@@ -101,6 +109,12 @@ designer's best output.
 - **Never open a modal during panel startup.** AE blocks dialogs while
   panels restore at launch and reports a cryptic "line 0" error; alerts
   belong in button handlers only, and `onResize` must never throw.
+- **`preferredSize` is a suggestion, not a lock.** The layout manager
+  hands a row's spare width to children as it pleases, and a control
+  with only `preferredSize` can silently stretch (a 40px swatch button
+  became a ~200px bar). Any control that must not stretch needs
+  `minimumSize` *and* `maximumSize` set to the same value as
+  `preferredSize` — all three.
 - **ES3 only.** No `Array.indexOf`, `map`, `filter`, JSON, `const`;
   write the loops. Also mind literal bytes: an editing slip that embeds
   a NUL in a string literal makes tools treat the source as binary.
@@ -141,6 +155,13 @@ Rules that make mocks pay off:
   drawn controls.
 - **Icon honesty test.** Before approving an icon set, try to name each
   tile without its tooltip. Any icon you can't guess gets redrawn.
+- **The mock hides resize behavior.** A mock approved at one width makes
+  silent flexbox promises (stretch ratios, right-alignment) that ScriptUI
+  expresses completely differently — both of Animated Arrow's wide-dock
+  bugs were invisible in the mock. Decide and annotate, per row, what
+  happens with extra width (which control stretches, which stay fixed),
+  and screenshot-test the real panel at a narrow *and* a wide dock
+  width, never just the design width.
 - **Compare variants side by side** (current vs. proposals) with a
   critique of the current layout — decisions come easier when the cost
   of the status quo is visible. Expect to keep iterating in the mock:
