@@ -55,7 +55,11 @@ When the panel receives focus, it loads settings from the selected generated
 arrows. Shared values display normally. Mixed numeric values display as `--`,
 mixed tile groups show no selected tile, and mixed colors use a checkered
 swatch. Changing a mixed control applies the new value to every selected
-arrow.
+arrow. A static arrow shows a duration of `0`.
+
+Inspecting arrows does not overwrite your creation settings. When no generated
+arrows are selected, the panel restores the settings it showed before the
+inspection, and **Create Arrow** uses those.
 
 The compact refresh button beside the color swatch loads the current selection
 explicitly when focus-based refresh is inconvenient.

@@ -11,6 +11,7 @@
     var selectedColor = [1, 1, 1];
     var selectedColorIsMixed = false;
     var isSyncingControls = false;
+    var isRunningPanelAction = false;
 
     // Tile icon PNGs embedded as binary strings by tools/make_icons.py.
     var ICON_PNG = {};
@@ -227,14 +228,16 @@
         };
 
         colorButton.onClick = function () {
-            var picked = $.colorPicker();
-            if (picked >= 0) {
-                selectedColor = integerToRgb(picked);
-                selectedColorIsMixed = false;
-                updateColorSwatchTip();
-                colorButton.notify("onDraw");
-                updateSelectedArrows({ color: selectedColor });
-            }
+            runPanelAction(function () {
+                var picked = $.colorPicker();
+                if (picked >= 0) {
+                    selectedColor = integerToRgb(picked);
+                    selectedColorIsMixed = false;
+                    updateColorSwatchTip();
+                    colorButton.notify("onDraw");
+                    updateSelectedArrows({ color: selectedColor });
+                }
+            });
         };
 
         strokeInput.onChange = function () {
@@ -280,6 +283,15 @@
         };
 
         createButton.onClick = function () {
+            // Restore creation settings first if arrows are no longer selected.
+            syncControlsFromSelection();
+            runPanelAction(createFromControls);
+        };
+
+        function createFromControls() {
+            // Read the modifier before any alert can change keyboard state.
+            var animate = !ScriptUI.environment.keyboardState.altKey;
+
             var strokeWidth = parsePositiveNumber(strokeInput.text, "Stroke width");
             if (strokeWidth === null) {
                 return;
@@ -290,12 +302,17 @@
                 return;
             }
 
-            var duration = parsePositiveNumber(durationInput.text, "Duration");
-            if (duration === null) {
-                return;
+            // Static arrows have no keyframes, so duration and easing are unused.
+            var duration = DEFAULT_DURATION;
+            var easing = "Linear";
+            if (animate) {
+                duration = parsePositiveNumber(durationInput.text, "Duration");
+                if (duration === null) {
+                    return;
+                }
+                easing = easingGroup.getValue();
             }
 
-            var easing = easingGroup.getValue();
             var style = styleGroup.getValue();
             var heads = headsGroup.getValue();
             if (
@@ -311,8 +328,6 @@
                 return;
             }
 
-            var animate = !ScriptUI.environment.keyboardState.altKey;
-
             createArrows(
                 strokeWidth,
                 headSize,
@@ -324,33 +339,75 @@
                 hideSourceCheckbox.value,
                 animate
             );
+        }
+
+        reverseButton.onClick = function () {
+            runPanelAction(reverseSelectedArrows);
         };
 
-        reverseButton.onClick = reverseSelectedArrows;
+        // Controls show the creation settings until generated arrows are
+        // selected. While inspecting, they show the selection's shared/mixed
+        // values; leaving the selection restores the creation settings.
+        var creationSettings = null;
+
+        function captureControls() {
+            return {
+                strokeText: strokeInput.text,
+                headText: headInput.text,
+                durationText: durationInput.text,
+                easing: easingGroup.getValue(),
+                style: styleGroup.getValue(),
+                heads: headsGroup.getValue(),
+                color: selectedColor,
+                colorIsMixed: selectedColorIsMixed
+            };
+        }
+
+        function applyControls(settings) {
+            strokeInput.text = settings.strokeText;
+            headInput.text = settings.headText;
+            durationInput.text = settings.durationText;
+            easingGroup.setValue(settings.easing);
+            styleGroup.setValue(settings.style);
+            headsGroup.setValue(settings.heads);
+            selectedColor = settings.color;
+            selectedColorIsMixed = settings.colorIsMixed;
+            updateColorSwatchTip();
+            colorButton.notify("onDraw");
+        }
 
         function syncControlsFromSelection() {
-            var values = readSelectedArrowSettings();
-            if (values === null) {
+            if (isSyncingControls || isRunningPanelAction) {
                 return;
             }
 
             isSyncingControls = true;
             try {
-                strokeInput.text = displayNumber(values.strokeWidth);
-                headInput.text = displayNumber(values.headSize);
-                durationInput.text = displayNumber(values.duration);
-                easingGroup.setValue(values.easing);
-                styleGroup.setValue(values.style);
-                headsGroup.setValue(values.heads);
-
-                if (values.color === null) {
-                    selectedColorIsMixed = true;
-                } else {
-                    selectedColor = values.color;
-                    selectedColorIsMixed = false;
+                var values = readSelectedArrowSettings();
+                if (values === null) {
+                    if (creationSettings !== null) {
+                        applyControls(creationSettings);
+                        creationSettings = null;
+                    }
+                    return;
                 }
-                updateColorSwatchTip();
-                colorButton.notify("onDraw");
+
+                if (creationSettings === null) {
+                    creationSettings = captureControls();
+                }
+                applyControls({
+                    strokeText: displayNumber(values.strokeWidth),
+                    headText: displayNumber(values.headSize),
+                    durationText: displayNumber(values.duration),
+                    easing: values.easing,
+                    style: values.style,
+                    heads: values.heads,
+                    color: values.color === null ? selectedColor : values.color,
+                    colorIsMixed: values.color === null
+                });
+            } catch (syncError) {
+                // A failed refresh must never raise a dialog from a focus
+                // event; that can loop as the panel regains focus.
             } finally {
                 isSyncingControls = false;
             }
@@ -366,6 +423,21 @@
 
         panel.layout.layout(true);
         return panel;
+    }
+
+    // Modal dialogs (alerts, the color picker) return focus to the panel when
+    // they close. Suppress focus-driven refreshes until the action finishes so
+    // they cannot overwrite controls or re-enter AE mid-operation.
+    function runPanelAction(action) {
+        if (isRunningPanelAction) {
+            return;
+        }
+        isRunningPanelAction = true;
+        try {
+            action();
+        } finally {
+            isRunningPanelAction = false;
+        }
     }
 
     function addInlineNumber(parent, label, defaultValue, tip) {
