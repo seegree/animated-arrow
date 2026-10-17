@@ -26,12 +26,25 @@ C:\Program Files\Adobe\Adobe After Effects 2025\Support Files\Scripts\ScriptUI P
 
 ## Use
 
-1. Draw or select one or more Mask Paths or Bezier Paths.
-2. Select the actual **Mask Path** or **Path** properties in the Timeline.
-3. Set stroke width, arrowhead size, color, duration, easing, style, and
+1. Select the source:
+   - **Shortcut:** select one or more layers that each hold exactly one path,
+     either a mask, a Bezier Path, or a Rectangle, Ellipse, or Polystar shape.
+   - **Specific path:** in the Timeline, select the **Mask Path** or **Path**
+     property, its group, or the Rectangle, Ellipse, or Polystar shape.
+2. Set stroke width, arrowhead size, color, duration, easing, style, and
    arrowhead placement.
-4. Place the playhead where the animation should begin.
-5. Click **Create Arrow**.
+3. Place the playhead where the animation should begin.
+4. Click **Create Arrow**.
+
+When any path is selected in the Timeline, only those paths are used.
+Otherwise every selected layer is checked. If any layer holds more than one
+path, nothing is created and the message names those layers so you can pick
+the path you want. Layers with no paths, such as text or nulls, are skipped,
+and so are layers that are already generated arrows.
+
+Rectangle, Ellipse, and Polystar shapes are read as Bezier outlines at the
+current time, and the source shape stays parametric. Their Path Direction
+setting decides which way the arrow travels.
 
 Alt/Option-click **Create Arrow** to create the arrow in its finished state. It
 is still built with Trim Paths (held at 100% with no keyframes), so the
@@ -99,8 +112,8 @@ of the arrow.
 - The generated layer is parented to the source layer so it follows later
   layer transforms.
 - Later edits to the original path do not update the copied arrow path.
-- Parametric Rectangle, Ellipse, and Polystar properties must first be
-  converted to a Bezier Path.
+- Shape modifiers such as Round Corners or Wiggle Paths are not applied to the
+  copied outline.
 
 The generated arrow uses only native After Effects shape properties and
 expressions. The panel is not needed after creation; it acts as an optional

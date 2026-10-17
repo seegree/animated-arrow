@@ -8,6 +8,12 @@
     var DEFAULT_DURATION = 0.5;
     var TILE_WIDTH = 26;
     var TILE_HEIGHT = 24;
+    var BEZIER_CIRCLE_KAPPA = 0.5522847498;
+    var PARAMETRIC_SHAPES = {
+        "ADBE Vector Shape - Rect": true,
+        "ADBE Vector Shape - Ellipse": true,
+        "ADBE Vector Shape - Star": true
+    };
     var selectedColor = [1, 1, 1];
     var selectedColorIsMixed = false;
     var isSyncingControls = false;
@@ -174,7 +180,8 @@
         createButton.alignment = ["fill", "center"];
         createButton.preferredSize.height = 30;
         createButton.helpTip =
-            "Create an animated arrow from the selected paths.\n" +
+            "Create an animated arrow from the selected paths, or from each\n" +
+            "selected layer that holds exactly one path or shape.\n" +
             "Alt/Option-click to create a finished, static arrow (no keyframes).";
         var reverseButton = buttonRow.add("button", undefined, "Reverse");
         reverseButton.preferredSize = [82, 30];
@@ -691,8 +698,22 @@
 
         var pathProperties = findSelectedPathProperties(comp);
         if (pathProperties.length === 0) {
+            var layerPaths = findSingleLayerPaths(comp);
+            if (layerPaths.ambiguous.length > 0) {
+                alert(
+                    "Choose a path for: " + layerPaths.ambiguous.join(", ") + ".\n\n" +
+                    "Select the Path, Mask Path, or shape you want in the Timeline, " +
+                    "then click Create Arrow.",
+                    SCRIPT_NAME
+                );
+                return;
+            }
+            pathProperties = layerPaths.paths;
+        }
+        if (pathProperties.length === 0) {
             alert(
-                "Select one or more Mask Path or Bezier shape Path properties.",
+                "Select a shape or masked layer, or one or more Mask Path, Path, " +
+                "Rectangle, Ellipse, or Polystar properties.",
                 SCRIPT_NAME
             );
             return;
@@ -797,7 +818,7 @@
         animate
     ) {
         var sourceLayer = sourcePath.propertyGroup(sourcePath.propertyDepth);
-        var sourceShape = sourcePath.valueAtTime(comp.time, false);
+        var sourceShape = readSourceShape(sourcePath, comp.time);
 
         if (!sourceShape || !sourceShape.vertices || sourceShape.vertices.length < 2) {
             throw new Error("Each selected path needs at least two vertices.");
@@ -879,21 +900,265 @@
         return arrowLayer;
     }
 
+    // A path source is a Bezier Path or Mask Path property, or a parametric
+    // Rectangle/Ellipse/Polystar group whose outline readSourceShape builds.
+    function toPathSource(property) {
+        var matchName = property.matchName;
+        if (
+            matchName === "ADBE Vector Shape" ||
+            matchName === "ADBE Mask Shape" ||
+            PARAMETRIC_SHAPES[matchName] === true
+        ) {
+            return property;
+        }
+        if (matchName === "ADBE Vector Shape - Group") {
+            return property.property("ADBE Vector Shape");
+        }
+        if (matchName === "ADBE Mask Atom") {
+            return property.property("ADBE Mask Shape");
+        }
+        return null;
+    }
+
     function findSelectedPathProperties(comp) {
         var selected = comp.selectedProperties;
         var paths = [];
+        var seen = {};
         var i;
 
         for (i = 0; i < selected.length; i += 1) {
-            if (
-                selected[i].matchName === "ADBE Vector Shape" ||
-                selected[i].matchName === "ADBE Mask Shape"
-            ) {
-                paths.push(selected[i]);
+            var source = toPathSource(selected[i]);
+            if (source === null) {
+                continue;
+            }
+            // Selecting a Path group and its Path property names one path.
+            var key = propertyKey(source);
+            if (seen[key] !== true) {
+                seen[key] = true;
+                paths.push(source);
             }
         }
 
         return paths;
+    }
+
+    function propertyKey(property) {
+        var parts = [];
+        var current = property;
+        while (current.parentProperty !== null) {
+            parts.push(current.propertyIndex);
+            current = current.parentProperty;
+        }
+        parts.push(current.index);
+        return parts.reverse().join("/");
+    }
+
+    // Layer-selection shortcut: each selected layer must hold exactly one
+    // path source. Generated arrows are skipped so inspecting one never
+    // builds an arrow from it.
+    function findSingleLayerPaths(comp) {
+        var layers = comp.selectedLayers;
+        var result = { paths: [], ambiguous: [] };
+        var i;
+
+        for (i = 0; i < layers.length; i += 1) {
+            if (findArrowGroup(layers[i]) !== null) {
+                continue;
+            }
+            var sources = collectLayerPathSources(layers[i]);
+            if (sources.length === 1) {
+                result.paths.push(sources[0]);
+            } else if (sources.length > 1) {
+                result.ambiguous.push(
+                    "\"" + layers[i].name + "\" (" + sources.length + " paths)"
+                );
+            }
+        }
+
+        return result;
+    }
+
+    function collectLayerPathSources(layer) {
+        var sources = [];
+        var masks = layer.property("ADBE Mask Parade");
+        var i;
+
+        if (masks !== null) {
+            for (i = 1; i <= masks.numProperties; i += 1) {
+                sources.push(masks.property(i).property("ADBE Mask Shape"));
+            }
+        }
+
+        var rootContents = layer.property("ADBE Root Vectors Group");
+        if (rootContents !== null) {
+            collectShapePathSources(rootContents, sources);
+        }
+        return sources;
+    }
+
+    function collectShapePathSources(contents, sources) {
+        var i;
+        for (i = 1; i <= contents.numProperties; i += 1) {
+            var child = contents.property(i);
+            if (child.matchName === "ADBE Vector Group") {
+                collectShapePathSources(child.property("ADBE Vectors Group"), sources);
+            } else {
+                var source = toPathSource(child);
+                if (source !== null) {
+                    sources.push(source);
+                }
+            }
+        }
+    }
+
+    function readSourceShape(source, time) {
+        var matchName = source.matchName;
+        if (PARAMETRIC_SHAPES[matchName] !== true) {
+            return source.valueAtTime(time, false);
+        }
+
+        function sample(name) {
+            return source.property(name).valueAtTime(time, false);
+        }
+
+        var shape;
+        if (matchName === "ADBE Vector Shape - Rect") {
+            shape = makeRectangleShape(
+                sample("ADBE Vector Rect Position"),
+                sample("ADBE Vector Rect Size"),
+                sample("ADBE Vector Rect Roundness")
+            );
+        } else if (matchName === "ADBE Vector Shape - Ellipse") {
+            shape = makeEllipseShape(
+                sample("ADBE Vector Ellipse Position"),
+                sample("ADBE Vector Ellipse Size")
+            );
+        } else {
+            shape = makeStarShape(
+                sample("ADBE Vector Star Type") === 2,
+                sample("ADBE Vector Star Points"),
+                sample("ADBE Vector Star Position"),
+                sample("ADBE Vector Star Rotation"),
+                source.property("ADBE Vector Star Inner Radius") !== null
+                    ? sample("ADBE Vector Star Inner Radius")
+                    : 0,
+                sample("ADBE Vector Star Outer Radius"),
+                source.property("ADBE Vector Star Inner Roundess") !== null
+                    ? sample("ADBE Vector Star Inner Roundess")
+                    : 0,
+                sample("ADBE Vector Star Outer Roundess")
+            );
+        }
+
+        // Shapes are built clockwise; Path Direction 3 is reversed.
+        var direction = source.property("ADBE Vector Shape Direction");
+        if (direction !== null && direction.valueAtTime(time, false) === 3) {
+            shape = reverseShape(shape);
+        }
+        return shape;
+    }
+
+    function makeClosedShape(vertices, inTangents, outTangents) {
+        var shape = new Shape();
+        shape.vertices = vertices;
+        shape.inTangents = inTangents;
+        shape.outTangents = outTangents;
+        shape.closed = true;
+        return shape;
+    }
+
+    // Clockwise from the top of the right edge.
+    function makeRectangleShape(center, size, roundness) {
+        var left = center[0] - size[0] / 2;
+        var right = center[0] + size[0] / 2;
+        var top = center[1] - size[1] / 2;
+        var bottom = center[1] + size[1] / 2;
+        var radius = Math.max(
+            0,
+            Math.min(roundness, Math.abs(size[0]) / 2, Math.abs(size[1]) / 2)
+        );
+
+        if (radius === 0) {
+            var corners = [[right, top], [right, bottom], [left, bottom], [left, top]];
+            return makeClosedShape(corners, zeroTangents(4), zeroTangents(4));
+        }
+
+        var handle = radius * BEZIER_CIRCLE_KAPPA;
+        return makeClosedShape(
+            [
+                [right, top + radius],
+                [right, bottom - radius],
+                [right - radius, bottom],
+                [left + radius, bottom],
+                [left, bottom - radius],
+                [left, top + radius],
+                [left + radius, top],
+                [right - radius, top]
+            ],
+            [
+                [0, -handle], [0, 0], [handle, 0], [0, 0],
+                [0, handle], [0, 0], [-handle, 0], [0, 0]
+            ],
+            [
+                [0, 0], [0, handle], [0, 0], [-handle, 0],
+                [0, 0], [0, -handle], [0, 0], [handle, 0]
+            ]
+        );
+    }
+
+    // Clockwise from the top.
+    function makeEllipseShape(center, size) {
+        var radiusX = size[0] / 2;
+        var radiusY = size[1] / 2;
+        var handleX = radiusX * BEZIER_CIRCLE_KAPPA;
+        var handleY = radiusY * BEZIER_CIRCLE_KAPPA;
+        return makeClosedShape(
+            [
+                [center[0], center[1] - radiusY],
+                [center[0] + radiusX, center[1]],
+                [center[0], center[1] + radiusY],
+                [center[0] - radiusX, center[1]]
+            ],
+            [[-handleX, 0], [0, -handleY], [handleX, 0], [0, handleY]],
+            [[handleX, 0], [0, handleY], [-handleX, 0], [0, -handleY]]
+        );
+    }
+
+    // Clockwise from the top point, rotated by Rotation. Roundness handles run
+    // tangent to the circle through each vertex, as in AE's parametric star.
+    function makeStarShape(
+        isPolygon,
+        points,
+        center,
+        rotation,
+        innerRadius,
+        outerRadius,
+        innerRoundness,
+        outerRoundness
+    ) {
+        var count = Math.max(2, Math.floor(points)) * (isPolygon ? 1 : 2);
+        var step = 2 * Math.PI / count;
+        var angle = -Math.PI / 2 + rotation * Math.PI / 180;
+        var vertices = [];
+        var inTangents = [];
+        var outTangents = [];
+        var i;
+
+        for (i = 0; i < count; i += 1) {
+            var isOuter = isPolygon || i % 2 === 0;
+            var radius = isOuter ? outerRadius : innerRadius;
+            var roundness = (isOuter ? outerRoundness : innerRoundness) / 100;
+            var handle = 2 * Math.PI * radius / (count * (isPolygon ? 4 : 2)) * roundness;
+            var cosine = Math.cos(angle);
+            var sine = Math.sin(angle);
+
+            vertices.push([center[0] + radius * cosine, center[1] + radius * sine]);
+            outTangents.push([-sine * handle, cosine * handle]);
+            inTangents.push([sine * handle, -cosine * handle]);
+            angle += step;
+        }
+
+        return makeClosedShape(vertices, inTangents, outTangents);
     }
 
     function configureLayerSpace(arrowLayer, sourceLayer) {
@@ -999,7 +1264,7 @@
 
         if (style === "Circle") {
             var radius = size / 2;
-            var tangent = radius * 0.5522847498;
+            var tangent = radius * BEZIER_CIRCLE_KAPPA;
             vertices = [
                 [0, 0],
                 [-radius, radius],
